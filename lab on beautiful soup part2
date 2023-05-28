@@ -1,0 +1,114 @@
+import bs4
+import requests
+import time
+import random as ran
+import sys
+import plotly.graph_objects as go
+import pandas as pd
+from dash import Dash, dcc, html, Input, Output
+from dash import dash_table
+
+def scrape_mblock(movie_block):
+    movie_data = {}
+
+    try:
+        movie_data['name'] = movie_block.find('td', {'class': 'titleColumn'}).find('a').get_text().strip()  # Name of the movie
+    except:
+        movie_data['name'] = None
+
+    try:
+        movie_data['year'] = int(movie_block.find('span', {'class': 'secondaryInfo'}).get_text()[1:-1])  # Release year
+    except:
+        movie_data['year'] = None
+
+    try:
+        movie_data['rating'] = float(movie_block.find('td', {'class': 'ratingColumn imdbRating'}).find('strong').get_text())  # Rating
+    except:
+        movie_data['rating'] = None
+
+    return movie_data
+
+def scrape_top250():
+    base_url = "https://www.imdb.com/chart/top?ref_=nv_mv_250"
+
+    source = requests.get(base_url).text
+    soup = bs4.BeautifulSoup(source, 'html.parser')
+    movie_blocks = soup.select('.lister-list tr')
+
+    movie_data = []
+
+    for movie_block in movie_blocks:
+        movie_data.append(scrape_mblock(movie_block))
+
+    return movie_data
+
+films = scrape_top250()
+
+def create_rating_chart():
+    df = pd.DataFrame(films[:10])  # Selecting the top 10 movies for visualization
+    fig = go.Figure(data=[go.Bar(x=df['name'], y=df['rating'])])
+    fig.update_layout(title='Top 10 Movies - Ratings')
+    return fig
+
+def create_year_chart():
+    df = pd.DataFrame(films)
+    year_counts = df['year'].value_counts().sort_index()
+    fig = go.Figure(data=[go.Bar(x=year_counts.index, y=year_counts.values)])
+    fig.update_layout(title='Top 250 Movies - Year Distribution')
+    return fig
+
+app = Dash(__name__)
+
+# ... previous code ...
+
+app.layout = html.Div(children=[
+    html.H1('Top 250 Movies Dashboard'),
+    html.Div([
+        html.H3('Top 10 Movies - Ratings'),
+        dcc.Graph(id='rating-chart', figure=create_rating_chart()),
+    ]),
+    html.Div([
+        html.H3('Year Distribution'),
+        dcc.Graph(id='year-chart', figure=create_year_chart()),
+    ]),
+    html.Div([
+        html.H3('Movie Table'),
+        dash_table.DataTable(
+            id='movie-table',
+            columns=[{'name': col, 'id': col} for col in films[0].keys()],
+            data=films
+        )
+    ]),
+    html.Div([
+        html.H3('Number of Movies to Display'),
+        dcc.Input(
+            id='movie-count-input',
+            type='number',
+            value=10
+        ),
+    ]),
+])
+
+
+@app.callback(
+    Output('rating-chart', 'figure'),
+    Output('year-chart', 'figure'),
+    Output('movie-table', 'data'),
+    Input('movie-count-input', 'value')
+)
+def update_charts(movie_count):
+    df = pd.DataFrame(films[:movie_count])  # Selecting the specified number of movies for visualization
+    rating_fig = go.Figure(data=[go.Bar(x=df['name'], y=df['rating'])])
+    rating_fig.update_layout(title='Top {} Movies - Ratings'.format(movie_count))
+
+    year_counts = df['year'].value_counts().sort_index()
+    year_fig = go.Figure(data=[go.Bar(x=year_counts.index, y=year_counts.values)])
+    year_fig.update_layout(title='Top {} Movies - Year Distribution'.format(movie_count))
+
+    table_data = df.to_dict('records')
+
+    return rating_fig, year_fig, table_data
+
+
+if __name__ == '__main__':
+    app.run_server(debug=True)
